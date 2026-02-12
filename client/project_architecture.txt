@@ -1,0 +1,96 @@
+Petluri Edutech LMS - Project Documentation
+=============================================
+
+1. SYSTEM ARCHITECTURE
+----------------------
+The frontend is built as a Single Page Application (SPA) using React 18 + Vite.
+It uses a Role-Based Access Control (RBAC) system with distinct zones for Public, Student, and Admin users.
+
+2. DETAILED FEATURE SPECIFICATIONS
+----------------------------------
+
+A. AUTHENTICATION & SECURITY
+   - **Unified Login**: A single login page (`/login`) handles both Students and Admins via tabs.
+   - **Role-Based Routing**:
+     - `/student/*` routes are protected for "student" role.
+     - `/admin/*` routes are protected for "admin" role.
+   - **Persistence**: Authentication state (JWT) should be persisted in localStorage/cookies.
+   - **Global Error Handling**: `ErrorBoundary` wraps the app to catch white-screen crashes and offer a reload option.
+
+B. COURSE & PROGRAM SYSTEM
+   - **Three-Tier Course Model**:
+     1. **Free Courses**: Open access, no certificate, "Start Learning" immediately.
+     2. **Certification Courses**: Paid, exams included, certificate upon completion.
+     3. **Professional Courses**: High-value, intensive bootcamps, job-ready focus.
+   - **Course Discovery**: `CourseListingPage` supports filtering by Level (Beginner/Adv) and Duration.
+
+C. STUDENT LEARNING EXPERIENCE
+   - **Dashboard**:
+     - Resume learning widget (continues last watched video).
+     - Progress tracking across all enrolled courses.
+     - Stats overview (Certificates earned, Hours spent).
+   - **Video Learning Interface**:
+     - **Player**: Embedded video player.
+     - **Playlist Sidebar**: Locks future videos until previous ones are completed (sequential learning).
+     - **Tabs**: Overview, Notes, and Resources tabs below the video.
+   - **Progress Tracking**: Visual progress bars update in real-time as modules are completed.
+
+D. ASSESSMENT & CERTIFICATION
+   - **Quizzes**:
+     - Multiple-choice questions.
+     - Timer functionality (visual countdown).
+     - Instant feedback (Pass/Fail).
+     - Prerequisite logic: Must pass quiz to unlock next module or certificate.
+   - **Certificates**:
+     - **Generation**: Auto-generated upon 100% course completion.
+     - **Verification**: Public `/verify` endpoint to validate certificate IDs.
+     - **Download**: PDF download capability.
+
+E. ADMIN ADMINISTRATION
+   - **Program Wizard**: 6-Step process to create comprehensive courses:
+     1. **Details**: Title, description, difficulty, type.
+     2. **Content**: Upload videos/PDFs.
+     3. **Quiz**: Manage assessment questions.
+     4. **Certificate**: Choose templates.
+     5. **Email**: Configure welcome/completion emails.
+     6. **Preview**: Final review before publishing.
+   - **Student Management**:
+     - List all students with search/filter.
+     - View individual progress and subscription status.
+     - CSV Export functionality for reporting.
+   - **Analytics Dashboard**: High-level metrics on Revenue, Enrollments, and Active Users.
+
+3. FILE STRUCTURE & COMPONENT MAP
+---------------------------------
+
+ROOT DIRECTORY: client/src/
+
+CORE CONFIGURATION
+- main.jsx: Entry point. Wraps app in `BrowserRouter` and `ErrorBoundary`.
+- App.jsx: Main Router configuration. Defines Public, Student, and Admin routes.
+- index.css: Tailwind CSS imports and base directives.
+
+COMPONENTS (src/components/)
+- **UI (Atomic)**: `Button`, `Input`, `Select`, `TextArea`, `Card`, `Badge`, `Modal`, `Tabs`, `Table`, `Pagination`, `ProgressBar`, `Loader`, `Icon` (Safe wrapper), `ErrorBoundary`.
+- **Layout**: `PublicLayout`, `StudentLayout`, `AdminLayout` (Wrappers for different zones).
+- **Navigation**: `Navbar` (Public), `Sidebar` (App), `Breadcrumb` (Automatic).
+- **Cards**: `CourseCard` (Listing), `VideoCard` (Playlist), `QuizCard` (Assessment), `CertificateCard` (Downloads), `StatCard` (Dashboard).
+
+PAGES (src/pages/)
+- **Public**: `LandingPage`, `CourseListingPage`, `LoginPage`.
+- **Student**: `Dashboard` (Stats), `MyCourses` (List), `LearningPage` (Video/Playlist), `QuizPage`, `CertificatePage`, `ProfilePage`.
+- **Admin**: `Dashboard` (Analytics), `ProgramWizard` (Create Course), `StudentManagement` (Table View).
+
+4. API REQUIREMENTS (BACKEND PLANNING)
+--------------------------------------
+To support the above frontend features, the backend needs these endpoints:
+
+1.  **Auth**: `/api/auth/login`, `/api/auth/register` (auto-enrollment).
+2.  **Courses**:
+    -   GET `/api/courses` (Public catalog).
+    -   GET `/api/student/courses` (Enrolled only).
+    -   POST `/api/admin/courses` (Wizard submission).
+    -   PUT `/api/courses/:id/progress` (Update video completion).
+3.  **Quizzes**: GET `/api/quiz/:id`, POST `/api/quiz/:id/submit`.
+4.  **Users**: GET/PUT `/api/user/profile`.
+5.  **Admin**: GET `/api/admin/students` (CSV Export data).
