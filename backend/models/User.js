@@ -21,6 +21,30 @@ const userSchema = new mongoose.Schema({
         minlength: 6,
         select: false // Do not return password by default
     },
+    tempPassword: {
+        type: String,
+        select: false // Only used for admin viewing initial credentials
+    },
+    phone: {
+        type: String,
+        required: [true, 'Please add a phone number'],
+        match: [
+            /^[0-9]{10}$/,
+            'Please add a valid 10-digit phone number'
+        ]
+    },
+    collegeName: {
+        type: String,
+        required: [true, 'Please add a college name']
+    },
+    collegeDetails: {
+        type: String,
+        required: [true, 'Please add college details (degree, year, etc.)']
+    },
+    personalAddress: {
+        type: String,
+        required: [true, 'Please add a personal address']
+    },
     role: {
         type: String,
         enum: ['student', 'admin'],

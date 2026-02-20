@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -7,6 +7,8 @@ import { Icon } from '@/components/ui/Icon';
 import { Label } from '@/components/ui/Label';
 import api from '@/lib/api';
 import ModuleEditor from '@/components/admin/ModuleEditor';
+import ProgramValidator from '@/components/admin/ProgramValidator';
+import { validateProgram } from '@/utils/programValidation';
 import { useNavigate, useParams } from 'react-router-dom';
 
 const ProgramWizard = () => {
@@ -25,9 +27,13 @@ const ProgramWizard = () => {
         price: '',
         programCode: '', // READ ONLY
         image: '', // Course Banner URL
+        certificateTemplate: '', // Certificate Background URL
         modules: [{ title: 'Introduction', content: [] }], // Default module
-        isPublished: false
+        status: 'draft' // Default status
     });
+
+    // Validation Status
+    const validationStatus = useMemo(() => validateProgram(formData), [formData]);
 
     // Fetch Course Data for Edit Mode
     useEffect(() => {
@@ -49,8 +55,9 @@ const ProgramWizard = () => {
                     price: course.price || '',
                     programCode: course.programCode || '',
                     image: course.image || '',
+                    certificateTemplate: course.certificateTemplate || '',
                     modules: course.modules || [],
-                    isPublished: course.isPublished || false
+                    status: course.status || (course.isPublished ? 'published' : 'draft') // fallback for legacy
                 });
             } catch (error) {
                 console.error("Failed to fetch course details", error);
@@ -105,16 +112,13 @@ const ProgramWizard = () => {
         }
     };
 
-    const steps = ['Program Details', 'Curriculum & Content', 'Settings & Config', 'Preview & Publish'];
+    const steps = ['Program Details', 'Curriculum & Content', 'Certification', 'Preview & Publish'];
 
     const handleNext = () => {
+        // Basic Step 1 Validation
         if (currentStep === 0) {
-            if (!formData.title || !formData.description || !formData.type || !formData.level || !formData.duration) {
-                alert("Please fill in all required fields.");
-                return;
-            }
-            if (formData.type !== 'free' && (!formData.price || Number(formData.price) <= 0)) {
-                alert("Price is required for paid programs.");
+            if (!formData.title || !formData.description) {
+                alert("Please fill in Title and Description to proceed.");
                 return;
             }
         }
@@ -122,41 +126,12 @@ const ProgramWizard = () => {
     };
     const handlePrev = () => setCurrentStep(prev => Math.max(prev - 1, 0));
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (targetStatus) => {
         setLoading(true);
 
         // Sanitize Data
-        // Sanitize Data
-        const sanitizedData = { ...formData };
-
-        // Validation
-        if (!sanitizedData.title || !sanitizedData.description || !sanitizedData.type || !sanitizedData.level || !sanitizedData.duration) {
-            alert("Please fill in all required fields (Title, Description, Type, Level, Duration).");
-            setLoading(false);
-            return;
-        }
-
-        if (sanitizedData.type !== 'free' && (!sanitizedData.price || Number(sanitizedData.price) <= 0)) {
-            alert("Price is required for paid programs.");
-            setLoading(false);
-            return;
-        }
-
-        // Validate Modules
-        if (sanitizedData.modules.length === 0) {
-            alert("Please add at least one module.");
-            setLoading(false);
-            return;
-        }
-
-        for (let i = 0; i < sanitizedData.modules.length; i++) {
-            const m = sanitizedData.modules[i];
-            if (!m.title || !m.description) {
-                alert(`Please fill in Name and Description for Module ${i + 1}`);
-                setLoading(false);
-                return;
-            }
-        }
+        const sanitizedData = { ...formData }; // Clone
+        sanitizedData.status = targetStatus;
 
         // 1. Handle Price
         if (!sanitizedData.price || isNaN(sanitizedData.price)) {
@@ -184,11 +159,11 @@ const ProgramWizard = () => {
             if (id) {
                 // Update existing course
                 await api.put(`/admin/courses/${id}`, sanitizedData);
-                alert("Program updated successfully!");
+                alert(`Program ${targetStatus === 'published' ? 'Published' : 'Saved as Draft'} successfully!`);
             } else {
                 // Create new course
                 await api.post('/admin/courses', sanitizedData);
-                alert("Program created successfully!");
+                alert(`Program ${targetStatus === 'published' ? 'Published' : 'Created as Draft'} successfully!`);
             }
             navigate('/admin/programs');
         } catch (error) {
@@ -298,6 +273,21 @@ const ProgramWizard = () => {
         </div>
     );
 
+    const handleCertificateUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            // Re-use the existing upload endpoint for simplicity as requested
+            const data = { filename: file.name, type: 'image' };
+            const response = await api.post('/admin/upload-video', data);
+            setFormData(prev => ({ ...prev, certificateTemplate: response.data.url }));
+        } catch (error) {
+            console.error("Certificate upload failed", error);
+            alert("Failed to upload certificate image.");
+        }
+    };
+
     const renderStep3 = () => (
         <div className="space-y-6">
             <div className="border rounded-lg p-6 bg-slate-50 space-y-4">
@@ -307,18 +297,35 @@ const ProgramWizard = () => {
                     </div>
                     <div>
                         <h3 className="font-semibold text-slate-800">Completion Certificate</h3>
-                        <p className="text-xs text-slate-500">Optional: Configure certificate settings</p>
+                        <p className="text-xs text-slate-500">Upload a custom certificate background (PNG/JPG).</p>
                     </div>
                 </div>
 
-                <Label>Certificate Template</Label>
-                <select
-                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1"
-                >
-                    <option value="">Select Template (Optional)</option>
-                    <option value="standard">Standard Completion</option>
-                    <option value="merit">Merit Certificate</option>
-                </select>
+                <div className="space-y-2">
+                    <Label htmlFor="certificate">Certificate Background Image</Label>
+                    <div className="flex flex-col gap-4">
+                        <Input
+                            id="certificate"
+                            type="file"
+                            onChange={handleCertificateUpload}
+                            accept="image/*"
+                            className="max-w-md"
+                        />
+                        {formData.certificateTemplate && (
+                            <div className="relative w-full max-w-md aspect-[1.414/1] rounded overflow-hidden border border-slate-200 shadow-sm">
+                                <img src={formData.certificateTemplate} alt="Certificate Preview" className="h-full w-full object-contain bg-white" />
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50">
+                                    <p className="text-xl font-serif text-slate-400 font-bold rotate-[-15deg] uppercase border-4 border-slate-200 p-4 rounded-xl">
+                                        Certificate Preview
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                        <p className="text-xs text-slate-500">
+                            The student's name and QR code will be automatically overlaid on this image.
+                        </p>
+                    </div>
+                </div>
             </div>
 
             {formData.type === 'internship' && (
@@ -347,42 +354,67 @@ const ProgramWizard = () => {
     );
 
     const renderStep4 = () => (
-        <div className="space-y-6">
-            <div className="text-center py-6">
-                <div className="bg-green-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
-                    <Icon name="CheckCircle" size={40} />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            {/* Main Validation & Summary */}
+            <div className="lg:col-span-2 space-y-6">
+                <div className="text-left">
+                    <h3 className="text-xl font-bold text-slate-900 mb-2">Review & Publish</h3>
+                    <p className="text-slate-500">Check the validation status below. Validation issues must be resolved before publishing.</p>
                 </div>
-                <h3 className="text-xl font-bold text-slate-900 mb-2">Ready to Publish!</h3>
-                <p className="text-slate-500 max-w-md mx-auto">Please review the details below before making this program live.</p>
+
+                <div className="bg-slate-50 p-6 rounded-lg space-y-4">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span className="text-slate-500 block">Title</span>
+                            <span className="font-medium text-slate-900">{formData.title}</span>
+                        </div>
+                        <div>
+                            <span className="text-slate-500 block">Type</span>
+                            <span className="font-medium text-slate-900 capitalize">{formData.type}</span>
+                        </div>
+                        <div>
+                            <span className="text-slate-500 block">Duration</span>
+                            <span className="font-medium text-slate-900">{formData.duration}</span>
+                        </div>
+                        <div>
+                            <span className="text-slate-500 block">Pricing</span>
+                            <span className="font-medium text-slate-900">{formData.price ? `₹${formData.price}` : 'Free'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Validation Status */}
+                {validationStatus.isReady ? (
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-green-700 flex items-center gap-3">
+                        <Icon name="CheckCircle" size={24} />
+                        <div>
+                            <h4 className="font-bold">Good to go!</h4>
+                            <p className="text-sm">This program meets all requirements and is ready to be published.</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 flex items-center gap-3">
+                        <Icon name="AlertTriangle" size={24} />
+                        <div>
+                            <h4 className="font-bold">Incomplete Draft</h4>
+                            <p className="text-sm">Please resolve the issues in the checklist to enable publishing.</p>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            <div className="bg-slate-50 p-6 rounded-lg space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                        <span className="text-slate-500 block">Title</span>
-                        <span className="font-medium text-slate-900">{formData.title}</span>
-                    </div>
-                    <div>
-                        <span className="text-slate-500 block">Type</span>
-                        <span className="font-medium text-slate-900 capitalize">{formData.type}</span>
-                    </div>
-                    <div>
-                        <span className="text-slate-500 block">Duration</span>
-                        <span className="font-medium text-slate-900">{formData.duration}</span>
-                    </div>
-                    <div>
-                        <span className="text-slate-500 block">Modules</span>
-                        <span className="font-medium text-slate-900">{formData.modules.length} Modules</span>
-                    </div>
-                </div>
+            {/* Sidebar Validator */}
+            <div className="lg:col-span-1">
+                <ProgramValidator formData={formData} />
             </div>
         </div>
     );
 
     return (
-        <div className="max-w-5xl mx-auto pb-20 space-y-8">
+        <div className="max-w-5xl mx-auto pb-24 space-y-8">
             <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-bold text-slate-900">Create New Program</h1>
+                <h1 className="text-2xl font-bold text-slate-900">{id ? 'Edit Program' : 'Create New Program'}</h1>
                 <Button variant="outline" onClick={() => navigate('/admin/programs')}>Cancel</Button>
             </div>
 
@@ -408,6 +440,7 @@ const ProgramWizard = () => {
                 </div>
             </div>
 
+            {/* Content Area */}
             <Card className="min-h-[400px]">
                 <CardHeader>
                     <CardTitle>{steps[currentStep]}</CardTitle>
@@ -420,15 +453,42 @@ const ProgramWizard = () => {
                 </CardContent>
             </Card>
 
-            <div className="flex justify-between">
-                <Button variant="outline" onClick={handlePrev} disabled={currentStep === 0}>Previous</Button>
-                {currentStep === steps.length - 1 ? (
-                    <Button onClick={handleSubmit} disabled={loading} className="bg-green-600 hover:bg-green-700">
-                        {loading ? 'Publishing...' : 'Publish Program'}
+            {/* Sticky/Fixed Footer Actions for easier access */}
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-50">
+                <div className="max-w-5xl mx-auto flex justify-between items-center">
+                    <Button variant="outline" onClick={handlePrev} disabled={currentStep === 0}>
+                        <Icon name="ChevronLeft" size={16} className="mr-2" /> Previous
                     </Button>
-                ) : (
-                    <Button onClick={handleNext}>Next Step</Button>
-                )}
+
+                    <div className="flex gap-3">
+                        {/* Always show Save Draft */}
+                        <Button
+                            variant="secondary"
+                            onClick={() => handleSubmit('draft')}
+                            disabled={loading}
+                            className="bg-slate-200 hover:bg-slate-300 text-slate-800"
+                        >
+                            <Icon name="Save" size={16} className="mr-2" />
+                            Save as Draft
+                        </Button>
+
+                        {/* Next or Publish */}
+                        {currentStep === steps.length - 1 ? (
+                            <Button
+                                onClick={() => handleSubmit('published')}
+                                disabled={loading || !validationStatus.isReady}
+                                className="bg-green-600 hover:bg-green-700 text-white"
+                            >
+                                {loading ? 'Publishing...' : 'Publish Live'}
+                                <Icon name="UploadCloud" size={16} className="ml-2" />
+                            </Button>
+                        ) : (
+                            <Button onClick={handleNext}>
+                                Next Step <Icon name="ChevronRight" size={16} className="ml-2" />
+                            </Button>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
     );

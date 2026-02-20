@@ -46,6 +46,10 @@ const courseSchema = new mongoose.Schema({
         type: String, // URL to course banner
         default: ''
     },
+    certificateTemplate: {
+        type: String, // URL to certificate background
+        default: ''
+    },
     modules: [{
         title: { type: String, required: true },
         description: { type: String, required: true }, // Added mandatory description
@@ -62,6 +66,11 @@ const courseSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Quiz'
     }], // Deprecated but kept for backward compatibility
+    status: {
+        type: String,
+        enum: ['draft', 'published', 'archived'],
+        default: 'draft'
+    },
     isPublished: {
         type: Boolean,
         default: false

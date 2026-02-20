@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import api from '@/lib/api';
 import { loadRazorpay } from '@/components/utils/loadRazorpay';
 import { useAuth } from '@/context/AuthContext';
+import EnrollmentFormModal from '@/components/EnrollmentFormModal';
 
 const CourseDetailPage = () => {
     const { id } = useParams();
@@ -15,6 +16,7 @@ const CourseDetailPage = () => {
     const [course, setCourse] = useState(null);
     const [loading, setLoading] = useState(true);
     const [enrolling, setEnrolling] = useState(false);
+    const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false);
 
     useEffect(() => {
         const fetchCourse = async () => {
@@ -37,85 +39,8 @@ const CourseDetailPage = () => {
         fetchCourse();
     }, [id]);
 
-    const handleEnroll = async () => {
-        if (!user) {
-            navigate('/login', { state: { from: `/courses/${id}` } });
-            return;
-        }
-
-        setEnrolling(true);
-        try {
-            // 1. Load Razorpay SDK
-            const res = await loadRazorpay();
-            if (!res) {
-                alert('Razorpay SDK failed to load. Are you online?');
-                return;
-            }
-
-            // 2. Create Order
-            const orderRes = await api.post('/payments/create-order', { courseId: id });
-
-            if (!orderRes.data || !orderRes.data.id) {
-                alert("Server error. Are you already enrolled?");
-                setEnrolling(false);
-                return;
-            }
-
-            const { amount, id: order_id, currency, key } = orderRes.data;
-
-            // 3. Open Razorpay Options
-            const options = {
-                key: key,
-                amount: amount.toString(),
-                currency: currency,
-                name: 'Petluri Edutech',
-                description: `Enrollment for ${course.title}`,
-                order_id: order_id,
-                handler: async function (response) {
-                    try {
-                        // 4. Verify Payment
-                        const verifyRes = await api.post('/payments/verify', {
-                            razorpay_order_id: response.razorpay_order_id,
-                            razorpay_payment_id: response.razorpay_payment_id,
-                            razorpay_signature: response.razorpay_signature,
-                            courseId: id
-                        });
-
-                        if (verifyRes.data.success) {
-                            alert("Enrollment Successful!");
-                            navigate('/student/dashboard');
-                        } else {
-                            alert("Payment verification failed.");
-                        }
-                    } catch (error) {
-                        console.error("Verification Error", error);
-                        alert("Payment verification failed on server.");
-                    }
-                },
-                prefill: {
-                    name: user.name,
-                    email: user.email,
-                    contact: user.phone || ''
-                },
-                theme: {
-                    color: '#2563EB'
-                }
-            };
-
-            const paymentObject = new window.Razorpay(options);
-            paymentObject.open();
-
-        } catch (error) {
-            console.error("Enrollment error", error);
-            if (error.response && error.response.status === 400 && error.response.data.message === 'Student already enrolled') {
-                alert("You are already enrolled in this course!");
-                navigate('/student/dashboard');
-            } else {
-                alert("Something went wrong. Please try again.");
-            }
-        } finally {
-            setEnrolling(false);
-        }
+    const handleEnrollClick = () => {
+        setIsEnrollModalOpen(true);
     };
 
     if (loading) return <div className="p-8 text-center text-slate-500">Loading course details...</div>;
@@ -230,7 +155,7 @@ const CourseDetailPage = () => {
 
                                     <Button
                                         className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700 shadow-md transition-all"
-                                        onClick={handleEnroll}
+                                        onClick={handleEnrollClick}
                                         disabled={enrolling}
                                     >
                                         {enrolling ? 'Processing...' : 'Enroll Now'}
@@ -247,6 +172,13 @@ const CourseDetailPage = () => {
                     </div>
                 </div>
             </div>
+
+            <EnrollmentFormModal
+                isOpen={isEnrollModalOpen}
+                onClose={() => setIsEnrollModalOpen(false)}
+                course={course}
+                initialUser={user}
+            />
         </div>
     );
 };

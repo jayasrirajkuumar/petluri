@@ -6,12 +6,18 @@ import { Icon } from '@/components/ui/Icon';
 import { PROGRAM_STYLES, PROGRAM_TYPES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
+import CredentialsModal from '@/components/admin/CredentialsModal';
 
 const EnrollmentsPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedRows, setSelectedRows] = useState([]);
     const [enrollments, setEnrollments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [credentialsModal, setCredentialsModal] = useState({
+        isOpen: false,
+        studentId: null,
+        studentEmail: null
+    });
 
     useEffect(() => {
         const fetchEnrollments = async () => {
@@ -40,6 +46,15 @@ const EnrollmentsPage = () => {
         setSelectedRows(prev =>
             prev.includes(id) ? prev.filter(rowId => rowId !== id) : [...prev, id]
         );
+    };
+
+    const handleOpenCredentials = (studentId, studentEmail) => {
+        if (!studentId) return;
+        setCredentialsModal({
+            isOpen: true,
+            studentId,
+            studentEmail
+        });
     };
 
     const copyTableData = () => {
@@ -106,30 +121,40 @@ const EnrollmentsPage = () => {
                                 <th className="p-4 w-4">
                                     <input type="checkbox" onChange={handleSelectAll} checked={selectedRows.length === enrollments.length && enrollments.length > 0} />
                                 </th>
-                                <th className="p-4 min-w-[150px]">Student Name</th>
+                                <th className="p-4 min-w-[120px]">Student ID</th>
+                                <th className="p-4 min-w-[150px]">Name</th>
                                 <th className="p-4 min-w-[200px]">Email</th>
+                                <th className="p-4 min-w-[150px]">Phone</th>
+                                <th className="p-4 min-w-[180px]">College/Corporate</th>
                                 <th className="p-4 min-w-[200px]">Program</th>
                                 <th className="p-4 min-w-[120px]">Type</th>
                                 <th className="p-4">Amount</th>
                                 <th className="p-4">Status</th>
                                 <th className="p-4 min-w-[100px]">Date</th>
-                                <th className="p-4 min-w-[250px] text-right">Actions</th>
+                                <th className="p-4 min-w-[150px] text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={9} className="text-center py-8 text-slate-500">Loading enrollments...</td>
+                                    <td colSpan={12} className="text-center py-8 text-slate-500">Loading enrollments...</td>
                                 </tr>
                             ) : filteredEnrollments.length === 0 ? (
                                 <tr>
-                                    <td colSpan={9} className="text-center py-8 text-slate-500">No enrollments found.</td>
+                                    <td colSpan={12} className="text-center py-8 text-slate-500">No enrollments found.</td>
                                 </tr>
                             ) : (
                                 filteredEnrollments.map((row) => {
                                     const type = row.courseId?.type || PROGRAM_TYPES.PROFESSIONAL;
                                     const typeStyle = PROGRAM_STYLES[type] || PROGRAM_STYLES[PROGRAM_TYPES.PROFESSIONAL];
-                                    const dateDisplay = row.createdAt ? new Date(row.createdAt).toLocaleDateString('en-GB') : '-';
+                                    const dateObj = row.paymentDetails?.createdAt || row.createdAt;
+                                    const dateDisplay = dateObj ? new Date(dateObj).toLocaleDateString('en-GB') : '-';
+
+                                    const studentId = row.userId?._id ? `PETLURI-${row.userId._id.toString().slice(-4).toUpperCase()}` : 'N/A';
+                                    const amountStr = row.paymentDetails?.amount ? `₹${row.paymentDetails.amount}` : (row.courseId?.price ? `₹${row.courseId.price}` : 'Free');
+                                    let statusStr = row.paymentDetails?.status || row.status || 'unknown';
+                                    if (statusStr === 'successful') statusStr = 'Paid';
+                                    if (statusStr === 'created') statusStr = 'Pending Payment';
 
                                     return (
                                         <tr key={row._id} className="hover:bg-slate-50 transition-colors">
@@ -140,12 +165,15 @@ const EnrollmentsPage = () => {
                                                     onChange={() => handleSelectRow(row._id)}
                                                 />
                                             </td>
+                                            <td className="p-4 font-mono text-sm text-slate-600">{studentId}</td>
                                             <td className="p-4 font-semibold text-slate-900">{row.userId?.name || 'Unknown'}</td>
                                             <td className="p-4 text-slate-700">{row.userId?.email || 'N/A'}</td>
-                                            <td className="p-4 text-slate-600">{row.courseId?.title || 'Unknown Course'}</td>
+                                            <td className="p-4 text-slate-700">{row.userId?.phone || '-'}</td>
+                                            <td className="p-4 text-slate-600 truncate max-w-[180px]" title={row.userId?.collegeName}>{row.userId?.collegeName || '-'}</td>
+                                            <td className="p-4 text-slate-600 font-medium">{row.courseId?.title || 'Unknown Course'}</td>
                                             <td className="p-4">
                                                 <span className={cn(
-                                                    "inline-flex items-center px-2 py-1 rounded text-xs font-medium border",
+                                                    "inline-flex items-center px-2 py-1 rounded text-xs font-medium border uppercase tracking-wider",
                                                     typeStyle.bg,
                                                     typeStyle.text,
                                                     typeStyle.border
@@ -153,13 +181,29 @@ const EnrollmentsPage = () => {
                                                     {type}
                                                 </span>
                                             </td>
-                                            <td className="p-4 font-medium text-slate-900">{row.courseId?.price || '-'}</td>
-                                            <td className="p-4 text-slate-600">{row.status}</td>
+                                            <td className="p-4 font-medium text-slate-900">{amountStr}</td>
+                                            <td className="p-4">
+                                                <span className={cn(
+                                                    "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
+                                                    statusStr === 'Paid' ? "bg-green-100 text-green-800" :
+                                                        statusStr === 'Pending Payment' ? "bg-yellow-100 text-yellow-800" :
+                                                            statusStr === 'active' ? "bg-blue-100 text-blue-800" :
+                                                                "bg-slate-100 text-slate-800"
+                                                )}>
+                                                    {statusStr}
+                                                </span>
+                                            </td>
                                             <td className="p-4 text-slate-600">{dateDisplay}</td>
                                             <td className="p-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
-                                                    <Button size="sm" variant="ghost" className="bg-purple-50 text-purple-700 hover:bg-purple-100 hover:text-purple-800 text-xs h-8">
-                                                        View Details
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        className="bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 text-xs h-8"
+                                                        onClick={() => handleOpenCredentials(row.userId?._id, row.userId?.email)}
+                                                    >
+                                                        <Icon name="Key" size={14} className="mr-1" />
+                                                        Credentials
                                                     </Button>
                                                 </div>
                                             </td>
@@ -180,6 +224,13 @@ const EnrollmentsPage = () => {
                     </div>
                 </div>
             </div>
+
+            <CredentialsModal
+                isOpen={credentialsModal.isOpen}
+                onClose={() => setCredentialsModal({ ...credentialsModal, isOpen: false })}
+                studentId={credentialsModal.studentId}
+                studentEmail={credentialsModal.studentEmail}
+            />
         </div>
     );
 };

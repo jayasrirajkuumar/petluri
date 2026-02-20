@@ -10,13 +10,27 @@ import QuizModal from './QuizModal';
 const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated }) => {
     const [draggedItem, setDraggedItem] = useState(null); // { type: 'module'|'content', moduleIndex, contentIndex }
     const [showQuizModal, setShowQuizModal] = useState(false);
+    const [editingQuizId, setEditingQuizId] = useState(null);
+    const [activeQuizSlot, setActiveQuizSlot] = useState(null); // { moduleIndex, contentIndex }
 
     const handleQuizCreated = (newQuiz) => {
         if (onQuizCreated) onQuizCreated(newQuiz);
-        setShowQuizModal(false);
-    };
 
-    // modules structure: [{ title, content: [{ type, title, url, duration, quizId }] }]
+        // Auto-assign to the active slot if one exists (only for new creation via this slot)
+        if (activeQuizSlot) {
+            const { moduleIndex, contentIndex } = activeQuizSlot;
+            const newModules = [...modules];
+            // Verify structure just in case
+            if (newModules[moduleIndex] && newModules[moduleIndex].content[contentIndex]) {
+                newModules[moduleIndex].content[contentIndex].quizId = newQuiz._id;
+                setModules(newModules);
+            }
+            setActiveQuizSlot(null);
+        }
+
+        setShowQuizModal(false);
+        setEditingQuizId(null);
+    };
 
     const addModule = () => {
         setModules([...modules, { title: 'New Module', content: [] }]);
@@ -28,6 +42,12 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
         setModules(newModules);
     };
 
+    const updateModuleDescription = (index, desc) => {
+        const newModules = [...modules];
+        newModules[index].description = desc;
+        setModules(newModules);
+    }
+
     const removeModule = (index) => {
         const newModules = modules.filter((_, i) => i !== index);
         setModules(newModules);
@@ -36,14 +56,12 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
     const addContent = (moduleIndex, type) => {
         const newModules = [...modules];
         if (type === 'video') {
-            // Simulate file selection for now, typically this would open a file dialog
-            // For MVP, we'll just add a placeholder that user can "upload" to
             newModules[moduleIndex].content.push({
                 type: 'video',
                 title: 'New Video',
                 url: '',
                 duration: '',
-                file: null // To hold selected file
+                file: null
             });
         } else if (type === 'quiz') {
             newModules[moduleIndex].content.push({
@@ -62,17 +80,14 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
     };
 
     const handleVideoUpload = async (moduleIndex, contentIndex, file) => {
-        // Simulate upload
-        // In real app, FormData with api.post('/admin/upload-video')
         try {
-            // Mock upload for now
             const formData = { filename: file.name, type: 'video' };
             const response = await api.post('/admin/upload-video', formData);
 
             const newModules = [...modules];
             newModules[moduleIndex].content[contentIndex].url = response.data.url;
-            newModules[moduleIndex].content[contentIndex].title = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
-            newModules[moduleIndex].content[contentIndex].duration = "10:00"; // Mock duration
+            newModules[moduleIndex].content[contentIndex].title = file.name.replace(/\.[^/.]+$/, "");
+            newModules[moduleIndex].content[contentIndex].duration = "10:00";
             setModules(newModules);
         } catch (error) {
             console.error("Upload failed", error);
@@ -89,10 +104,9 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
     const handleModuleDragStart = (e, index) => {
         setDraggedItem({ type: 'module', moduleIndex: index });
         e.dataTransfer.effectAllowed = "move";
-        // e.target.style.opacity = '0.5';
     };
 
-    const handleModuleDragOver = (e, index) => {
+    const handleModuleDragOver = (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
     };
@@ -110,7 +124,7 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
 
     // Content Drag Handlers
     const handleContentDragStart = (e, mIndex, cIndex) => {
-        e.stopPropagation(); // Prevent module drag start
+        e.stopPropagation();
         setDraggedItem({ type: 'content', moduleIndex: mIndex, contentIndex: cIndex });
         e.dataTransfer.effectAllowed = "move";
     };
@@ -142,7 +156,7 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
                     className="bg-slate-50 border border-slate-200"
                     draggable
                     onDragStart={(e) => handleModuleDragStart(e, mIndex)}
-                    onDragOver={(e) => handleModuleDragOver(e, mIndex)}
+                    onDragOver={handleModuleDragOver}
                     onDrop={(e) => handleModuleDrop(e, mIndex)}
                 >
                     <CardContent className="p-4 space-y-4">
@@ -190,7 +204,6 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
                                     className="flex items-center gap-3 bg-white p-3 rounded border border-slate-100"
                                     draggable
                                     onDragStart={(e) => handleContentDragStart(e, mIndex, cIndex)}
-                                    // Handle drop on the item itself to permit reordering
                                     onDragOver={handleContentDragOver}
                                     onDrop={(e) => handleContentDrop(e, mIndex, cIndex)}
                                 >
@@ -216,7 +229,6 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
                                                     onChange={(e) => handleVideoUpload(mIndex, cIndex, e.target.files[0])}
                                                     className="text-xs"
                                                 />
-                                                {/* Hidden duration for now, handled by upload mock */}
                                             </div>
                                         ) : (
                                             <div className="flex gap-2 w-full">
@@ -235,7 +247,11 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
                                                     size="icon"
                                                     className="shrink-0"
                                                     title="Create New Quiz"
-                                                    onClick={() => setShowQuizModal(true)}
+                                                    onClick={() => {
+                                                        setActiveQuizSlot({ moduleIndex: mIndex, contentIndex: cIndex });
+                                                        setEditingQuizId(null);
+                                                        setShowQuizModal(true);
+                                                    }}
                                                 >
                                                     <Icon name="Plus" size={16} />
                                                 </Button>
@@ -243,9 +259,38 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
                                         )}
                                     </div>
 
-                                    <Button variant="ghost" size="sm" onClick={() => removeContent(mIndex, cIndex)} className="text-red-400 hover:text-red-600">
-                                        <Icon name="X" size={16} />
-                                    </Button>
+                                    <div className="flex gap-1">
+                                        {item.type === 'video' ? (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    if (item.url) window.open(item.url, '_blank');
+                                                    else alert("No URL to preview");
+                                                }}
+                                                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                                title="Preview Video"
+                                            >
+                                                <Icon name="Eye" size={16} />
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setEditingQuizId(item.quizId);
+                                                    setShowQuizModal(true);
+                                                }}
+                                                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                                title="Edit Quiz"
+                                            >
+                                                <Icon name="Edit" size={16} />
+                                            </Button>
+                                        )}
+                                        <Button variant="ghost" size="sm" onClick={() => removeContent(mIndex, cIndex)} className="text-red-400 hover:text-red-600">
+                                            <Icon name="X" size={16} />
+                                        </Button>
+                                    </div>
                                 </div>
                             ))}
 
@@ -281,7 +326,12 @@ const ModuleEditor = ({ modules = [], setModules, quizzes = [], onQuizCreated })
 
             {showQuizModal && (
                 <QuizModal
-                    onClose={() => setShowQuizModal(false)}
+                    quizId={editingQuizId}
+                    onClose={() => {
+                        setShowQuizModal(false);
+                        setEditingQuizId(null);
+                        setActiveQuizSlot(null); // Clear slot on close
+                    }}
                     onSuccess={handleQuizCreated}
                 />
             )}

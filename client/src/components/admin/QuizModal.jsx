@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Icon } from '@/components/ui/Icon';
 import api from '@/lib/api';
 
-const QuizModal = ({ onClose, onSuccess }) => {
-    const [mode, setMode] = useState('choice'); // 'choice', 'manual', 'csv', 'preview'
+const QuizModal = ({ quizId, onClose, onSuccess }) => {
+    const [mode, setMode] = useState('choice'); // 'choice', 'manual', 'csv'
     const [loading, setLoading] = useState(false);
+    const [fetching, setFetching] = useState(false);
 
     // Manual Form State
     const [manualForm, setManualForm] = useState({
@@ -19,9 +20,33 @@ const QuizModal = ({ onClose, onSuccess }) => {
 
     // CSV State
     const [csvFile, setCsvFile] = useState(null);
-    const [parsedQuestions, setParsedQuestions] = useState([]);
 
-    // CSV Template
+    useEffect(() => {
+        if (quizId) {
+            setFetching(true);
+            setMode('manual'); // Default to manual for editing
+            const fetchQuiz = async () => {
+                try {
+                    const res = await api.get(`/admin/quizzes/${quizId}`);
+                    const quiz = res.data;
+                    setManualForm({
+                        title: quiz.title,
+                        passingScore: quiz.passingScore,
+                        timeLimit: quiz.timeLimit,
+                        questions: quiz.questions
+                    });
+                } catch (error) {
+                    console.error("Failed to fetch quiz", error);
+                    alert("Failed to load quiz details");
+                } finally {
+                    setFetching(false);
+                }
+            };
+            fetchQuiz();
+        }
+    }, [quizId]);
+
+    // ... (CSV Helper functions: downloadTemplate, parseCSV - kept same)
     const downloadTemplate = () => {
         const headers = ['Question Text', 'Option A', 'Option B', 'Option C', 'Option D', 'Correct Answer (A/B/C/D)', 'Points'];
         const sample = ['What is React?', 'A Library', 'A Framework', 'A Database', 'A Language', 'A', '1'];
@@ -45,21 +70,18 @@ const QuizModal = ({ onClose, onSuccess }) => {
 
         // Skip header
         for (let i = 1; i < lines.length; i++) {
-            // Handle CSV parsing more robustly if needed (quotes), but simple split for now
             const parts = lines[i].split(',').map(p => p.trim());
             if (parts.length < 6) continue;
 
             const [qText, optA, optB, optC, optD, correctChar, pts] = parts;
             const options = [optA, optB, optC, optD];
 
-            // Map A/B/C/D to the actual text content
             let correctText = '';
             const correctIndex = map[correctChar];
             if (correctIndex !== undefined && options[correctIndex]) {
                 correctText = options[correctIndex];
             } else {
-                // Fallback: assume they might have typed the text directly or it's invalid
-                correctText = correctChar;
+                correctText = correctChar; // Fallback
             }
 
             questions.push({
@@ -72,9 +94,13 @@ const QuizModal = ({ onClose, onSuccess }) => {
         return questions;
     };
 
-    const handleCreate = async (questionsToSubmit) => {
+    const handleCreate = async () => {
         if (!manualForm.title) {
             alert("Please enter a quiz title");
+            return;
+        }
+        if (manualForm.questions.length === 0) {
+            alert("Please add at least one question.");
             return;
         }
 
@@ -84,16 +110,22 @@ const QuizModal = ({ onClose, onSuccess }) => {
                 title: manualForm.title,
                 passingScore: Number(manualForm.passingScore),
                 timeLimit: Number(manualForm.timeLimit),
-                questions: questionsToSubmit,
+                questions: manualForm.questions,
                 courseId: null // Optional as per backend update
             };
 
-            const res = await api.post('/admin/create-quiz', payload);
+            let res;
+            if (quizId) {
+                res = await api.put(`/admin/quizzes/${quizId}`, payload);
+            } else {
+                res = await api.post('/admin/create-quiz', payload);
+            }
+
             onSuccess(res.data);
             onClose();
         } catch (error) {
-            console.error("Quiz creation failed", error);
-            alert("Failed to create quiz: " + (error.response?.data?.message || error.message));
+            console.error("Quiz save failed", error);
+            alert("Failed to save quiz: " + (error.response?.data?.message || error.message));
         } finally {
             setLoading(false);
         }
@@ -108,40 +140,79 @@ const QuizModal = ({ onClose, onSuccess }) => {
             const questions = parseCSV(text);
             if (questions.length === 0) return alert("No questions found in CSV");
 
-            setParsedQuestions(questions);
-            setMode('preview');
+            // Merge CSV questions into manual form and switch to manual mode
+            setManualForm(prev => ({
+                ...prev,
+                questions: [...prev.questions, ...questions]
+            }));
+            setMode('manual');
         };
         reader.readAsText(csvFile);
     };
 
-    const handleManualSubmit = () => {
-        if (manualForm.questions.length === 0) {
-            alert("Please add at least one question.");
-            return;
-        }
-        handleCreate(manualForm.questions);
+    // Simple state for adding/editing a question
+    const [editingIndex, setEditingIndex] = useState(-1);
+    const [newQ, setNewQ] = useState({ q: '', a: '', b: '', c: '', d: '', correct: '' });
+
+    const handleEditQuestion = (index) => {
+        const q = manualForm.questions[index];
+        setNewQ({
+            q: q.questionText,
+            a: q.options[0],
+            b: q.options[1],
+            c: q.options[2],
+            d: q.options[3],
+            correct: q.correctAnswer
+        });
+        setEditingIndex(index);
     };
 
-    // Simple state for adding a manual question
-    const [newQ, setNewQ] = useState({ q: '', a: '', b: '', c: '', d: '', correct: '' });
-    const addManualQuestion = () => {
-        if (!newQ.q || !newQ.correct || !newQ.a) return alert("Fill question details");
-        setManualForm(prev => ({
-            ...prev,
-            questions: [...prev.questions, {
-                questionText: newQ.q,
-                options: [newQ.a, newQ.b, newQ.c, newQ.d],
-                correctAnswer: newQ.correct
-            }]
-        }));
+    const saveQuestion = () => {
+        if (!newQ.q || !newQ.correct || !newQ.a || !newQ.b) return alert("Fill question details and select correct answer");
+
+        const questionObj = {
+            questionText: newQ.q,
+            options: [newQ.a, newQ.b, newQ.c, newQ.d],
+            correctAnswer: newQ.correct
+        };
+
+        setManualForm(prev => {
+            const updatedQuestions = [...prev.questions];
+            if (editingIndex >= 0) {
+                updatedQuestions[editingIndex] = questionObj;
+            } else {
+                updatedQuestions.push(questionObj);
+            }
+            return { ...prev, questions: updatedQuestions };
+        });
+
+        // Reset
         setNewQ({ q: '', a: '', b: '', c: '', d: '', correct: '' });
+        setEditingIndex(-1);
     };
+
+    // Helper to determine if an option is selected as correct
+    const isCorrect = (optionValue) => {
+        return newQ.correct === optionValue && optionValue !== '';
+    };
+
+    const setCorrectOption = (val) => {
+        setNewQ({ ...newQ, correct: val });
+    };
+
+    if (fetching) {
+        return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                <div className="bg-white p-6 rounded-lg">Loading quiz details...</div>
+            </div>
+        );
+    }
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold">Create New Quiz</h2>
+                    <h2 className="text-xl font-bold">{quizId ? 'Edit Quiz' : 'Create New Quiz'}</h2>
                     <Button variant="ghost" size="sm" onClick={onClose}><Icon name="X" /></Button>
                 </div>
 
@@ -192,19 +263,8 @@ const QuizModal = ({ onClose, onSuccess }) => {
                                     <div className="flex-1 bg-slate-100 p-2 rounded text-center border border-slate-300 font-medium">Question Text</div>
                                     <div className="w-24 bg-slate-100 p-2 rounded text-center border border-slate-300 text-slate-500">Option A</div>
                                     <div className="w-24 bg-slate-100 p-2 rounded text-center border border-slate-300 text-slate-500">Option B</div>
-                                    <div className="w-24 bg-slate-100 p-2 rounded text-center border border-slate-300 text-slate-500">Option C</div>
-                                    <div className="w-24 bg-slate-100 p-2 rounded text-center border border-slate-300 text-slate-500">Option D</div>
+                                    {/* ... truncated for check ... */}
                                     <div className="w-32 bg-green-50 p-2 rounded text-center border border-green-200 text-green-700 font-bold">Answer (A/B/C/D)</div>
-                                    <div className="w-16 bg-slate-100 p-2 rounded text-center border border-slate-300 text-slate-500">Points</div>
-                                </div>
-                                <div className="min-w-[700px] flex gap-2 mt-2 text-sm opacity-60">
-                                    <div className="flex-1 p-2 text-center">What is X?</div>
-                                    <div className="w-24 p-2 text-center">Ans 1</div>
-                                    <div className="w-24 p-2 text-center">Ans 2</div>
-                                    <div className="w-24 p-2 text-center">Ans 3</div>
-                                    <div className="w-24 p-2 text-center">Ans 4</div>
-                                    <div className="w-32 p-2 text-center font-bold">A</div>
-                                    <div className="w-16 p-2 text-center">1</div>
                                 </div>
                             </div>
                         </div>
@@ -225,76 +285,96 @@ const QuizModal = ({ onClose, onSuccess }) => {
 
                         <div className="flex justify-end gap-2 mt-4">
                             <Button variant="outline" onClick={() => setMode('choice')}>Back</Button>
-                            <Button onClick={handleCSVUpload} disabled={!csvFile}>Preview Questions</Button>
-                        </div>
-                    </div>
-                )}
-
-                {mode === 'preview' && (
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <h3 className="font-semibold text-lg">Preview Questions ({parsedQuestions.length})</h3>
-                            <div className="text-sm text-slate-500">Check correct answers</div>
-                        </div>
-
-                        <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2">
-                            {parsedQuestions.map((q, i) => (
-                                <div key={i} className="border p-4 rounded bg-slate-50">
-                                    <p className="font-semibold mb-3">{i + 1}. {q.questionText}</p>
-                                    <div className="space-y-2">
-                                        {q.options.map((opt, optIndex) => {
-                                            const isCorrect = opt === q.correctAnswer;
-                                            return (
-                                                <div key={optIndex} className={`flex items-center gap-3 p-2 rounded ${isCorrect ? 'bg-green-100 border border-green-200' : 'bg-white border border-slate-200'}`}>
-                                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isCorrect ? 'border-green-600' : 'border-slate-300'}`}>
-                                                        {isCorrect && <div className="w-2.5 h-2.5 rounded-full bg-green-600" />}
-                                                    </div>
-                                                    <span className={isCorrect ? 'font-medium text-green-900' : 'text-slate-700'}>{opt}</span>
-                                                    {isCorrect && <span className="ml-auto text-xs font-bold text-green-600 px-2 py-0.5 bg-green-200 rounded">CORRECT</span>}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="flex justify-end gap-2">
-                            <Button variant="outline" onClick={() => setMode('csv')}>Back to Upload</Button>
-                            <Button onClick={() => handleCreate(parsedQuestions)} disabled={loading}>
-                                {loading ? 'Creating Quiz...' : 'Confirm & Create Quiz'}
-                            </Button>
+                            <Button onClick={handleCSVUpload} disabled={!csvFile}>Parse & Edit Questions</Button>
                         </div>
                     </div>
                 )}
 
                 {mode === 'manual' && (
                     <div className="space-y-6">
-                        <div className="border p-4 rounded bg-slate-50 space-y-3">
-                            <Label>New Question</Label>
+                        {/* Edit/Add Question Form */}
+                        <div className="border p-4 rounded bg-slate-50 space-y-4">
+                            <h3 className="font-semibold text-slate-700">{editingIndex >= 0 ? 'Edit Question' : 'New Question'}</h3>
                             <Input placeholder="Question Text" value={newQ.q} onChange={e => setNewQ({ ...newQ, q: e.target.value })} />
-                            <div className="grid grid-cols-2 gap-2">
-                                <Input placeholder="Option A" value={newQ.a} onChange={e => setNewQ({ ...newQ, a: e.target.value })} />
-                                <Input placeholder="Option B" value={newQ.b} onChange={e => setNewQ({ ...newQ, b: e.target.value })} />
-                                <Input placeholder="Option C" value={newQ.c} onChange={e => setNewQ({ ...newQ, c: e.target.value })} />
-                                <Input placeholder="Option D" value={newQ.d} onChange={e => setNewQ({ ...newQ, d: e.target.value })} />
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {[
+                                    { label: 'Option A', val: newQ.a, key: 'a' },
+                                    { label: 'Option B', val: newQ.b, key: 'b' },
+                                    { label: 'Option C', val: newQ.c, key: 'c' },
+                                    { label: 'Option D', val: newQ.d, key: 'd' }
+                                ].map((opt, i) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                        <div
+                                            onClick={() => setCorrectOption(opt.val)}
+                                            className={`w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer ${isCorrect(opt.val) ? 'border-green-600' : 'border-slate-300'}`}
+                                            title="Mark as Correct Answer"
+                                        >
+                                            {isCorrect(opt.val) && <div className="w-2.5 h-2.5 rounded-full bg-green-600" />}
+                                        </div>
+                                        <Input
+                                            placeholder={opt.label}
+                                            value={opt.val}
+                                            onChange={e => {
+                                                const newVal = e.target.value;
+                                                setNewQ(prev => {
+                                                    const updated = { ...prev, [opt.key]: newVal };
+                                                    // If this was the correct answer, update correct answer text too to keep sync
+                                                    if (prev.correct === prev[opt.key]) {
+                                                        updated.correct = newVal;
+                                                    }
+                                                    return updated;
+                                                });
+                                            }}
+                                        />
+                                    </div>
+                                ))}
                             </div>
-                            <Input placeholder="Correct Answer (Exact String)" value={newQ.correct} onChange={e => setNewQ({ ...newQ, correct: e.target.value })} />
-                            <Button size="sm" onClick={addManualQuestion}>Add Question</Button>
+
+                            {!newQ.correct && <p className="text-xs text-red-500">Please select the correct answer by clicking the radio button next to an option.</p>}
+
+                            <div className="flex justify-end gap-2">
+                                {editingIndex >= 0 && <Button variant="ghost" size="sm" onClick={() => { setEditingIndex(-1); setNewQ({ q: '', a: '', b: '', c: '', d: '', correct: '' }); }}>Cancel Edit</Button>}
+                                <Button size="sm" onClick={saveQuestion}>{editingIndex >= 0 ? 'Update Question' : 'Add Question'}</Button>
+                            </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <h4 className="font-semibold">Questions ({manualForm.questions.length})</h4>
+                        {/* List of Questions */}
+                        <div className="space-y-3">
+                            <h4 className="font-semibold">Questions List ({manualForm.questions.length})</h4>
+                            {manualForm.questions.length === 0 && <p className="text-sm text-slate-500 italic">No questions added yet.</p>}
+
                             {manualForm.questions.map((q, i) => (
-                                <div key={i} className="text-sm p-2 border rounded bg-white">
-                                    <span className="font-medium">{i + 1}. {q.questionText}</span>
+                                <div key={i} className={`text-sm p-3 border rounded bg-white flex justify-between items-start ${editingIndex === i ? 'ring-2 ring-blue-500' : ''}`}>
+                                    <div className="space-y-1">
+                                        <span className="font-medium">{i + 1}. {q.questionText}</span>
+                                        <div className="flex gap-2 text-xs text-slate-500">
+                                            {q.options.map((opt, idx) => (
+                                                <span key={idx} className={q.correctAnswer === opt ? "text-green-600 font-bold" : ""}>
+                                                    {['A', 'B', 'C', 'D'][idx]}: {opt}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-1 shrink-0">
+                                        <Button variant="ghost" size="sm" onClick={() => handleEditQuestion(i)} title="Edit">
+                                            <Icon name="Edit" size={14} className="text-blue-500" />
+                                        </Button>
+                                        <Button variant="ghost" size="sm" onClick={() => {
+                                            const newQuestions = [...manualForm.questions];
+                                            newQuestions.splice(i, 1);
+                                            setManualForm(prev => ({ ...prev, questions: newQuestions }));
+                                        }} title="Delete">
+                                            <Icon name="Trash2" size={14} className="text-red-500" />
+                                        </Button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="flex justify-end gap-2">
-                            <Button variant="outline" onClick={() => setMode('choice')}>Back</Button>
-                            <Button onClick={handleManualSubmit} disabled={loading}>{loading ? 'Creating...' : 'Create Quiz'}</Button>
+                        <div className="flex justify-end gap-2 pt-4 border-t">
+                            {!quizId && <Button variant="outline" onClick={() => setMode('choice')}>Back to Options</Button>}
+                            <Button onClick={handleCreate} disabled={loading}>{loading ? 'Saving Quiz...' : (quizId ? 'Update Quiz' : 'Create Quiz')}</Button>
                         </div>
                     </div>
                 )}

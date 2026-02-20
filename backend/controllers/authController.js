@@ -82,4 +82,21 @@ const getMe = async (req, res) => {
     }
 };
 
-module.exports = { loginUser, registerUser, getMe };
+// @desc    Check if email exists and return details (excluding password)
+// @route   POST /api/auth/check-email
+// @access  Public
+const checkEmail = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await User.findOne({ email }).select('-password');
+        if (user) {
+            res.json({ exists: true, user });
+        } else {
+            res.json({ exists: false });
+        }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+module.exports = { loginUser, registerUser, getMe, checkEmail };

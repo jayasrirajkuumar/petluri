@@ -2,15 +2,87 @@ const Course = require('../models/Course');
 const User = require('../models/User');
 const Enrollment = require('../models/Enrollment');
 const Quiz = require('../models/Quiz');
+const Payment = require('../models/Payment');
 const sendEmail = require('../services/emailService');
 const crypto = require('crypto'); // For random password
 
 // @desc    Create a new course
 // @route   POST /api/admin/courses
 // @access  Private/Admin
+// Helper: Validate Program for Publishing
+const validateProgram = (data) => {
+    const errors = [];
+
+    // 1. Basic Details
+    if (!data.title) errors.push("Program title is required");
+    if (!data.description) errors.push("Description is required");
+    if (!data.type) errors.push("Program type is required");
+    if (!data.level) errors.push("Difficulty level is required");
+    if (!data.duration) errors.push("Duration is required");
+
+    // 2. Price Logic
+    if (data.type !== 'free') {
+        if (!data.price || data.price <= 0) errors.push("Price > 0 is required for paid programs");
+    } else {
+        if (data.price > 0) errors.push("Free programs must have price = 0");
+    }
+
+    // 3. Module & Content Logic (Common for all except Internship? User said Internship doesn't need videos)
+    // "INTERNSHIP PROGRAM (No videos)"
+    if (data.type !== 'internship') {
+        if (!data.modules || data.modules.length === 0) {
+            errors.push("At least one module is required");
+        } else {
+            let hasContent = false;
+            data.modules.forEach((mod, idx) => {
+                if (!mod.content || mod.content.length === 0) {
+                    errors.push(`Module ${idx + 1} (${mod.title}) is empty`);
+                } else {
+                    hasContent = true;
+                    // Check for at least one video if it's a video-based program
+                    // User said: "At least 1 module... Each module must contain: At least 1 video" 
+                    // Wait, "Each module must contain: At least 1 video"? Or just "At least 1 module"?
+                    // User said: "At least 1 module... Each module must contain: At least 1 video". 
+                    // Let's enforce strict rule: Every module must have at least one video (or maybe content?).
+                    // Let's assume "At least one item of content" is the hard rule, and "At least 1 video" implies the program must have content.
+                    // Actually, the requirement says: "Each module must contain: At least 1 video". 
+                    // This is quite strict. Let's verify if `type` is video based.
+                    // "VIDEO-BASED PROGRAMS (Free / Certification / Professional)" -> Yes.
+
+                    const hasVideo = mod.content.some(c => c.type === 'video');
+                    if (!hasVideo) errors.push(`Module ${idx + 1} must contain at least one video`);
+                }
+            });
+            if (!hasContent) errors.push("Program must have content");
+        }
+    }
+
+    // 4. Certification specific
+    if (data.type === 'certification') {
+        if (!data.certificateTemplate) {
+            errors.push("Certification programs must have a certificate background image.");
+        }
+    }
+
+    // 5. Internship Logic
+    if (data.type === 'internship') {
+        // "Internship description... Duration... Outcome"
+        // These map to standard fields?
+        // "Video modules NOT required"
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+};
+
+// @desc    Create a new course
+// @route   POST /api/admin/courses
+// @access  Private/Admin
 const createCourse = async (req, res) => {
     try {
-        const { title, description, type, level, duration, price, videos, modules, image, isPublished } = req.body;
+        const { title, description, type, level, duration, price, videos, modules, image, certificateTemplate, status } = req.body;
 
         // Generate Program Code
         const prefixes = {
@@ -23,6 +95,20 @@ const createCourse = async (req, res) => {
         const randomNum = Math.floor(10000 + Math.random() * 90000); // 5 digit random number
         const programCode = `${prefix}-${randomNum}`; // e.g. FC-12345
 
+        let finalStatus = status || 'draft';
+        let isPublished = finalStatus === 'published';
+
+        // Validation if trying to publish
+        if (finalStatus === 'published') {
+            const validation = validateProgram(req.body);
+            if (!validation.isValid) {
+                return res.status(400).json({
+                    message: "Cannot publish invalid program",
+                    errors: validation.errors
+                });
+            }
+        }
+
         const course = await Course.create({
             programCode,
             title,
@@ -32,11 +118,16 @@ const createCourse = async (req, res) => {
             duration,
             price,
             image: image || '',
+            certificateTemplate: certificateTemplate || '',
             modules: modules || [],
             videos: videos || [], // Legacy support
-            isPublished: isPublished || false,
+            status: finalStatus,
+            isPublished: isPublished,
             createdBy: req.user._id
         });
+
+        // Link Quizzes
+        await linkQuizzesToCourse(course._id, modules);
 
         res.status(201).json(course);
     } catch (error) {
@@ -49,15 +140,44 @@ const createCourse = async (req, res) => {
 // @access  Private/Admin
 const updateCourse = async (req, res) => {
     try {
+        const { status, modules } = req.body;
+
+        let updateData = { ...req.body };
+
+        // If status is changing to published, or is already published and being updated
+        // actually, we should validate if the RESULTING state is valid.
+        // But for simplicity, if request says status='published', we validate the incoming body merged with existing? 
+        // Or just the incoming body if it's a full update?
+        // PUT usually replaces, but often used as PATCH. 
+        // Let's assume req.body contains the full form data from the UI wizard.
+
+        if (status === 'published') {
+            const validation = validateProgram(req.body);
+            if (!validation.isValid) {
+                return res.status(400).json({
+                    message: "Cannot publish invalid program",
+                    errors: validation.errors
+                });
+            }
+            updateData.isPublished = true;
+        } else if (status === 'draft' || status === 'archived') {
+            updateData.isPublished = false;
+        }
+
         const course = await Course.findById(req.params.id);
 
         if (!course) {
             return res.status(404).json({ message: 'Course not found' });
         }
 
-        const updatedCourse = await Course.findByIdAndUpdate(req.params.id, req.body, {
+        const updatedCourse = await Course.findByIdAndUpdate(req.params.id, updateData, {
             new: true,
         });
+
+        // Link Quizzes
+        if (modules) {
+            await linkQuizzesToCourse(updatedCourse._id, modules);
+        }
 
         res.json(updatedCourse);
     } catch (error) {
@@ -147,6 +267,7 @@ const createStudent = async (req, res) => {
             name,
             email,
             password, // Hook will hash it
+            tempPassword: password, // For admin to view
             role: 'student'
         });
 
@@ -203,6 +324,76 @@ const enrollStudent = async (req, res) => {
         res.status(201).json(enrollment);
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    View Student Credentials (requires admin validation)
+// @route   POST /api/admin/enrollments/:id/credentials
+// @access  Private/Admin
+const getStudentCredentials = async (req, res) => {
+    try {
+        const { adminPassword } = req.body;
+        const studentId = req.params.id;
+
+        // Verify admin password
+        const adminUser = await User.findById(req.user._id).select('+password');
+        if (!adminUser) return res.status(401).json({ message: 'Admin not found' });
+
+        const isMatch = await adminUser.matchPassword(adminPassword);
+        if (!isMatch) return res.status(401).json({ message: 'Invalid admin password' });
+
+        // Retrieve student
+        const student = await User.findById(studentId).select('+tempPassword');
+        if (!student) return res.status(404).json({ message: 'Student not found' });
+
+        res.json({
+            email: student.email,
+            password: student.tempPassword || 'Password intentionally removed or not generated'
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to retrieve credentials', error: error.message });
+    }
+};
+
+// @desc    Resend Student Credentials
+// @route   POST /api/admin/enrollments/:id/resend-credentials
+// @access  Private/Admin
+const resendStudentCredentials = async (req, res) => {
+    try {
+        const studentId = req.params.id;
+        const student = await User.findById(studentId).select('+tempPassword');
+
+        if (!student) return res.status(404).json({ message: 'Student not found' });
+
+        const rawPassword = student.tempPassword || 'Not Available (User may have reset it)';
+
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+            return res.status(500).json({ message: 'Email service is not configured on the server.' });
+        }
+
+        const message = `
+            <h2>Hello ${student.name},</h2>
+            <p>Your login credentials have been requested to be resent to you.</p>
+            <ul>
+                <li><strong>Email:</strong> ${student.email}</li>
+                <li><strong>Password/Secret:</strong> ${rawPassword}</li>
+            </ul>
+            <p>Please log in and ensure your information is secure.</p>
+            <p>Regards,<br>Petluri Edutech</p>
+        `;
+
+        await sendEmail({
+            email: student.email,
+            subject: 'Your Petluri Edutech Login Credentials',
+            html: message,
+            message: `Email: ${student.email}, Password: ${rawPassword}`
+        });
+
+        res.json({ message: 'Credentials email sent to student successfully' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to resend credentials', error: error.message });
     }
 };
 
@@ -263,10 +454,25 @@ const uploadVideo = async (req, res) => {
 const getAllEnrollments = async (req, res) => {
     try {
         const enrollments = await Enrollment.find({})
-            .populate('userId', 'name email')
-            .populate('courseId', 'title type price')
-            .sort({ createdAt: -1 });
-        res.json(enrollments);
+            .populate('userId', 'name email phone collegeName collegeDetails personalAddress')
+            .populate('courseId', 'title type price programCode')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Fetch corresponding payments for each enrollment
+        const enrichedEnrollments = await Promise.all(enrollments.map(async (enrollment) => {
+            const payment = await Payment.findOne({
+                userId: enrollment.userId?._id,
+                courseId: enrollment.courseId?._id
+            }).sort({ createdAt: -1 }).lean();
+
+            return {
+                ...enrollment,
+                paymentDetails: payment || null
+            };
+        }));
+
+        res.json(enrichedEnrollments);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -277,7 +483,7 @@ const getAllEnrollments = async (req, res) => {
 // @access  Private/Admin
 const getAllQuizzes = async (req, res) => {
     try {
-        const quizzes = await Quiz.find({}).populate('courseId', 'title');
+        const quizzes = await Quiz.find().populate('courseId', 'title');
         res.json(quizzes);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -416,6 +622,67 @@ const getDashboardStats = async (req, res) => {
     }
 };
 
+// Helper to link quizzes to course
+const linkQuizzesToCourse = async (courseId, modules) => {
+    if (!modules || modules.length === 0) return;
+
+    const quizIds = [];
+    modules.forEach(mod => {
+        if (mod.content) {
+            mod.content.forEach(item => {
+                if (item.type === 'quiz' && item.quizId) {
+                    quizIds.push(item.quizId);
+                }
+            });
+        }
+    });
+
+    if (quizIds.length > 0) {
+        // Bulk update quizzes to set courseId
+        await Quiz.updateMany(
+            { _id: { $in: quizIds } },
+            { $set: { courseId: courseId } }
+        );
+    }
+};
+
+// ... (existing code)
+
+// @desc    Get single quiz by ID
+// @route   GET /api/admin/quizzes/:id
+// @access  Private/Admin
+const getQuizById = async (req, res) => {
+    try {
+        const quiz = await Quiz.findById(req.params.id);
+        if (!quiz) {
+            return res.status(404).json({ message: 'Quiz not found' });
+        }
+        res.json(quiz);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Update a quiz
+// @route   PUT /api/admin/quizzes/:id
+// @access  Private/Admin
+const updateQuiz = async (req, res) => {
+    try {
+        const quiz = await Quiz.findById(req.params.id);
+        if (!quiz) {
+            return res.status(404).json({ message: 'Quiz not found' });
+        }
+
+        const updatedQuiz = await Quiz.findByIdAndUpdate(req.params.id, req.body, {
+            new: true,
+        });
+
+        res.json(updatedQuiz);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     createCourse,
     updateCourse,
@@ -425,9 +692,14 @@ module.exports = {
     enrollStudent,
     getAllEnrollments,
     createStudent,
+    getStudentCredentials,
+    resendStudentCredentials,
     createQuiz,
     getAllQuizzes,
+    getQuizById,
+    updateQuiz,
     getDashboardStats,
     uploadVideo,
-    deleteCourse
+    deleteCourse,
+    linkQuizzesToCourse // Exporting for use in controllers if needed, but here it's internal helper
 };

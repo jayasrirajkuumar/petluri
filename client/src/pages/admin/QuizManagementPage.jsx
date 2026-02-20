@@ -1,32 +1,52 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Icon } from '@/components/ui/Icon';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
 import api from '@/lib/api';
+import QuizModal from '@/components/admin/QuizModal';
 
 const QuizManagementPage = () => {
-    const navigate = useNavigate();
     const [quizzes, setQuizzes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
-    useEffect(() => {
-        const fetchQuizzes = async () => {
-            try {
-                const response = await api.get('/admin/quizzes');
-                setQuizzes(response.data || []);
-            } catch (error) {
-                console.error("Failed to fetch quizzes:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
+    // Modal State
+    const [showQuizModal, setShowQuizModal] = useState(false);
+    const [editingQuizId, setEditingQuizId] = useState(null);
 
+    const fetchQuizzes = async () => {
+        try {
+            setLoading(true);
+            const response = await api.get('/admin/quizzes');
+            setQuizzes(response.data || []);
+        } catch (error) {
+            console.error("Failed to fetch quizzes:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         fetchQuizzes();
     }, []);
+
+    const handleQuizSaved = () => {
+        setShowQuizModal(false);
+        setEditingQuizId(null);
+        fetchQuizzes(); // Refresh list
+    };
+
+    const handleDelete = async (id) => {
+        if (!window.confirm("Are you sure you want to delete this quiz?")) return;
+        try {
+            // Assuming there's a delete endpoint, if not, we can implement or skip
+            // await api.delete(`/admin/quizzes/${id}`);
+            alert("Delete functionality not yet implemented in backend for specific quizzes.");
+        } catch (error) {
+            console.error("Delete failed", error);
+        }
+    };
 
     const filteredQuizzes = quizzes.filter(quiz =>
         quiz.title.toLowerCase().includes(searchTerm.toLowerCase())
@@ -39,7 +59,10 @@ const QuizManagementPage = () => {
                     <h1 className="text-2xl font-bold text-slate-900">Quiz Management</h1>
                     <p className="text-sm text-slate-500">Create, edit, and manage quizzes for all courses.</p>
                 </div>
-                <Button onClick={() => navigate('/admin/quizzes/create')}>
+                <Button onClick={() => {
+                    setEditingQuizId(null);
+                    setShowQuizModal(true);
+                }}>
                     <Icon name="Plus" size={16} className="mr-2" />
                     Create New Quiz
                 </Button>
@@ -88,7 +111,13 @@ const QuizManagementPage = () => {
                             filteredQuizzes.map((quiz) => (
                                 <TableRow key={quiz._id}>
                                     <TableCell className="font-medium text-slate-900">{quiz.title}</TableCell>
-                                    <TableCell className="text-slate-600">{quiz.courseId?.title || 'Unassigned'}</TableCell>
+                                    <TableCell className="text-slate-600">
+                                        {quiz.courseId ? (
+                                            <span className="text-blue-600 font-medium">{quiz.courseId.title}</span>
+                                        ) : (
+                                            <span className="text-slate-400 italic">Unassigned</span>
+                                        )}
+                                    </TableCell>
                                     <TableCell>{quiz.questions?.length || 0}</TableCell>
                                     <TableCell>{quiz.timeLimit} mins</TableCell>
                                     <TableCell>{quiz.passingScore}%</TableCell>
@@ -97,11 +126,18 @@ const QuizManagementPage = () => {
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={() => navigate(`/admin/quizzes/edit/${quiz._id}`)}
+                                                onClick={() => {
+                                                    setEditingQuizId(quiz._id);
+                                                    setShowQuizModal(true);
+                                                }}
                                             >
                                                 <Icon name="Edit" size={16} className="text-slate-500" />
                                             </Button>
-                                            <Button variant="ghost" size="icon">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleDelete(quiz._id)}
+                                            >
                                                 <Icon name="Trash2" size={16} className="text-red-500" />
                                             </Button>
                                         </div>
@@ -112,6 +148,17 @@ const QuizManagementPage = () => {
                     </TableBody>
                 </Table>
             </div>
+
+            {showQuizModal && (
+                <QuizModal
+                    quizId={editingQuizId}
+                    onClose={() => {
+                        setShowQuizModal(false);
+                        setEditingQuizId(null);
+                    }}
+                    onSuccess={handleQuizSaved}
+                />
+            )}
         </div>
     );
 };

@@ -11,9 +11,13 @@ const {
     getAllEnrollments,
     createQuiz,
     getAllQuizzes,
+    getQuizById,
+    updateQuiz,
     getDashboardStats,
     uploadVideo,
-    deleteCourse
+    deleteCourse,
+    getStudentCredentials,
+    resendStudentCredentials
 } = require('../controllers/adminController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminOnly } = require('../middlewares/roleMiddleware');
@@ -32,9 +36,13 @@ router.get('/students', getAllStudents);
 router.post('/create-student', createStudent);
 router.post('/enroll-student', enrollStudent);
 router.get('/enrollments', getAllEnrollments);
+router.post('/enrollments/:id/credentials', getStudentCredentials);
+router.post('/enrollments/:id/resend-credentials', resendStudentCredentials);
 
 router.post('/create-quiz', createQuiz);
 router.get('/quizzes', getAllQuizzes);
+router.get('/quizzes/:id', getQuizById);
+router.put('/quizzes/:id', updateQuiz);
 router.get('/dashboard-stats', getDashboardStats);
 router.post('/upload-video', uploadVideo);
 

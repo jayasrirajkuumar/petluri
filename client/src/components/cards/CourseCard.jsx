@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 
-const CourseCard = ({ course, type = 'professional' }) => {
+const CourseCard = ({ course, type = 'professional', onEnrollClick }) => {
     const { title, description, duration, level, image, price } = course;
 
     // Derived or Default Data (Mocking missing fields based on UI requirement)
@@ -84,14 +84,40 @@ const CourseCard = ({ course, type = 'professional' }) => {
                 </div>
 
                 {/* 6. Button */}
-                <Link to={`/courses/${course._id}`} className="mt-2 block">
-                    <Button
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-6 rounded-lg text-base shadow-sm transition-all hover:shadow-md flex items-center justify-between px-6"
-                    >
-                        View Details
-                        <Icon name="ChevronRight" size={20} />
-                    </Button>
-                </Link>
+                <div className="mt-2 flex gap-3">
+                    {onEnrollClick ? (
+                        <Button
+                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-6 rounded-lg text-base shadow-sm transition-all hover:shadow-md"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                onEnrollClick(course);
+                            }}
+                        >
+                            Enroll Now
+                        </Button>
+                    ) : (
+                        <Link to={`/courses/${course._id}`} className="flex-1">
+                            <Button
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-6 rounded-lg text-base shadow-sm transition-all hover:shadow-md flex items-center justify-between px-6"
+                            >
+                                View Details
+                                <Icon name="ChevronRight" size={20} />
+                            </Button>
+                        </Link>
+                    )}
+
+                    {onEnrollClick && (
+                        <Link to={`/courses/${course._id}`} className="flex-none">
+                            <Button
+                                variant="outline"
+                                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 font-medium py-6 rounded-lg text-sm shadow-sm transition-all flex items-center justify-center px-4"
+                                title="View Details"
+                            >
+                                <Icon name="ChevronRight" size={20} />
+                            </Button>
+                        </Link>
+                    )}
+                </div>
 
             </CardContent>
             {/* Decorative Top Border similar to screenshot if needed, 

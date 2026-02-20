@@ -6,10 +6,20 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Icon } from '@/components/ui/Icon';
 import api from '@/lib/api';
+import EnrollmentFormModal from '@/components/EnrollmentFormModal';
+import { useAuth } from '@/context/AuthContext';
 
 const CourseListingPage = ({ title, subtitle, type = 'professional' }) => {
+    const { user } = useAuth();
     const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false);
+    const [selectedCourseForEnrollment, setSelectedCourseForEnrollment] = useState(null);
+
+    const handleEnrollClick = (course) => {
+        setSelectedCourseForEnrollment(course);
+        setIsEnrollModalOpen(true);
+    };
 
     useEffect(() => {
         const fetchCourses = async () => {
@@ -160,7 +170,7 @@ const CourseListingPage = ({ title, subtitle, type = 'professional' }) => {
                     <>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                             {courses.map((course) => (
-                                <CourseCard key={course._id} course={course} type={type} />
+                                <CourseCard key={course._id} course={course} type={type} onEnrollClick={handleEnrollClick} />
                             ))}
                         </div>
 
@@ -177,6 +187,18 @@ const CourseListingPage = ({ title, subtitle, type = 'professional' }) => {
                     </>
                 )}
             </div>
+
+            {selectedCourseForEnrollment && (
+                <EnrollmentFormModal
+                    isOpen={isEnrollModalOpen}
+                    onClose={() => {
+                        setIsEnrollModalOpen(false);
+                        setSelectedCourseForEnrollment(null);
+                    }}
+                    course={selectedCourseForEnrollment}
+                    initialUser={user}
+                />
+            )}
         </div>
     );
 };
