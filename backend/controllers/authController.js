@@ -99,4 +99,71 @@ const checkEmail = async (req, res) => {
     }
 };
 
-module.exports = { loginUser, registerUser, getMe, checkEmail };
+const Otp = require('../models/Otp');
+const { sendOtpEmail } = require('../services/emailService');
+
+// @desc    Send OTP to email
+// @route   POST /api/auth/send-otp
+// @access  Public
+const sendOtp = async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        // Generate 6 digit OTP
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Clear existing OTPs for this email
+        await Otp.deleteMany({ email });
+
+        // Save new OTP to DB
+        await Otp.create({ email, otp: otpCode });
+
+        // Send Email
+        await sendOtpEmail(email, otpCode);
+
+        res.json({ success: true, message: 'OTP sent to email' });
+    } catch (error) {
+        console.error('OTP Send Error:', error);
+        res.status(500).json({ message: 'Failed to send OTP' });
+    }
+};
+
+// @desc    Verify OTP & Login/Register
+// @route   POST /api/auth/verify-otp
+// @access  Public
+const verifyOtp = async (req, res) => {
+    const { email, otp } = req.body;
+
+    try {
+        const otpRecord = await Otp.findOne({ email, otp });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'Invalid or expired OTP' });
+        }
+
+        // Check if user exists
+        let user = await User.findOne({ email });
+
+        if (!user) {
+            // Special case: If user doesn't exist, we might want to return a flag 
+            // OR auto-register if it's a known email from pre-enrollment.
+            // For now, let's assume login only for existing users via OTP.
+            return res.status(404).json({ message: 'User not found. Please register first or enroll in a course.' });
+        }
+
+        // Delete OTP after successful verification
+        await Otp.deleteOne({ _id: otpRecord._id });
+
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            token: generateToken(user._id, user.role),
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+module.exports = { loginUser, registerUser, getMe, checkEmail, sendOtp, verifyOtp };

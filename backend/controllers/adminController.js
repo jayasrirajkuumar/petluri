@@ -162,6 +162,14 @@ const updateCourse = async (req, res) => {
             updateData.isPublished = true;
         } else if (status === 'draft' || status === 'archived') {
             updateData.isPublished = false;
+        } else {
+            // Keep current publishing state if status is not explicitly changed to draft/archived
+            // This allows updating a 'published' course without sending status='published' every time
+            const currentCourse = await Course.findById(req.params.id);
+            if (currentCourse && currentCourse.status === 'published') {
+                updateData.isPublished = true;
+                updateData.status = 'published';
+            }
         }
 
         const course = await Course.findById(req.params.id);
@@ -252,7 +260,7 @@ const getAllStudents = async (req, res) => {
 // @route   POST /api/admin/create-student
 // @access  Private/Admin
 const createStudent = async (req, res) => {
-    const { name, email } = req.body;
+    const { name, email, phone, collegeName, collegeDetails, personalAddress } = req.body;
 
     try {
         const userExists = await User.findOne({ email });
@@ -268,28 +276,39 @@ const createStudent = async (req, res) => {
             email,
             password, // Hook will hash it
             tempPassword: password, // For admin to view
+            phone: phone || '0000000000',
+            collegeName: collegeName || 'Not Provided',
+            collegeDetails: collegeDetails || 'Not Provided',
+            personalAddress: personalAddress || 'Not Provided',
             role: 'student'
         });
 
         // Send Email
-        const message = `
-            <h1>Welcome to Petluri Edutech LMS</h1>
-            <p>Your account has been created successfully.</p>
-            <p><strong>Email:</strong> ${email}</p>
-            <p><strong>Password:</strong> ${password}</p>
-            <p>Please login and change your password immediately.</p>
+        const htmlMessage = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+                <h2 style="color: #007bff; text-align: center;">Welcome to Petluri Edutech LMS</h2>
+                <p>Hello <strong>${name}</strong>,</p>
+                <p>Your student account has been created successfully by the administrator. You can now access your learning portal.</p>
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <p style="margin: 5px 0;"><strong>Login URL:</strong> <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/login" style="color: #007bff;">Click Here to Login</a></p>
+                    <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
+                    <p style="margin: 5px 0;"><strong>Temporary Password:</strong> <code style="background: #eee; padding: 2px 5px; border-radius: 3px;">${password}</code></p>
+                </div>
+                <p style="color: #666; font-size: 14px;">Please login and change your password immediately to ensure your account security.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="font-size: 12px; color: #777; text-align: center;">&copy; 2026 Petluri Edutech LMS. All rights reserved.</p>
+            </div>
         `;
 
         try {
             await sendEmail({
                 email: user.email,
-                subject: 'Your Student Account Credentials',
-                html: message,
+                subject: 'Your Petluri Edutech Student Account Credentials',
+                html: htmlMessage,
                 message: `Email: ${email}, Password: ${password}` // fallback
             });
         } catch (emailError) {
             console.error('Email send failed', emailError);
-            // Don't fail the request, just log it
         }
 
         res.status(201).json({

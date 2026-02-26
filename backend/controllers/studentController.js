@@ -111,6 +111,11 @@ const completeVideo = async (req, res) => {
 
         if (enrollment.completionPercentage === 100) {
             enrollment.status = 'completed';
+
+            // Issue Certificate
+            const { issueCertificate } = require('../services/certificateService');
+            await issueCertificate(req.user._id, courseId);
+            enrollment.certificateIssued = true;
         }
 
         await enrollment.save();
