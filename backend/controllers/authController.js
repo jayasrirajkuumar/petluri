@@ -106,9 +106,24 @@ const { sendOtpEmail } = require('../services/emailService');
 // @route   POST /api/auth/send-otp
 // @access  Public
 const sendOtp = async (req, res) => {
-    const { email } = req.body;
+    const email = req.body.email.toLowerCase();
+    console.log(`DEBUG: Received send-otp request for ${email}`);
 
     try {
+        // Check if user exists and is a student
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            console.log(`DEBUG: User not found for email: ${email}`);
+            return res.status(404).json({ message: 'User not found. Please enroll in a course first.' });
+        }
+
+        console.log(`DEBUG: User found: ${user._id}, role: ${user.role}`);
+
+        if (user.role !== 'student') {
+            return res.status(403).json({ message: 'OTP login is currently only for student accounts.' });
+        }
+
         // Generate 6 digit OTP
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -118,8 +133,27 @@ const sendOtp = async (req, res) => {
         // Save new OTP to DB
         await Otp.create({ email, otp: otpCode });
 
-        // Send Email
-        await sendOtpEmail(email, otpCode);
+        // Log OTP to console for development testing
+        console.log(`DEBUG: process.env.NODE_ENV = ${process.env.NODE_ENV}`);
+        console.log(`[DEV] OTP for ${email}: ${otpCode}`);
+
+        // Send Email (Don't let email failure block login for dev)
+        try {
+            console.log('DEBUG: Attempting to send OTP email...');
+            await sendOtpEmail(email, otpCode);
+            console.log('DEBUG: sendOtpEmail resolved successfully');
+        } catch (emailError) {
+            console.error('DEBUG: Email sending failed:', emailError.message);
+            // In development, we still want to return success so the user can enter the OTP from console
+            if (process.env.NODE_ENV !== 'production') {
+                return res.json({
+                    success: true,
+                    message: 'OTP logged to console (Email sending failed)',
+                    devNote: 'Check your backend terminal for the OTP code.'
+                });
+            }
+            throw emailError;
+        }
 
         res.json({ success: true, message: 'OTP sent to email' });
     } catch (error) {
@@ -159,6 +193,10 @@ const verifyOtp = async (req, res) => {
             name: user.name,
             email: user.email,
             role: user.role,
+            phone: user.phone,
+            collegeName: user.collegeName,
+            collegeDetails: user.collegeDetails,
+            personalAddress: user.personalAddress,
             token: generateToken(user._id, user.role),
         });
     } catch (error) {

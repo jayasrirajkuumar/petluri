@@ -160,13 +160,14 @@ const updateCourse = async (req, res) => {
                 });
             }
             updateData.isPublished = true;
+            updateData.status = 'published';
         } else if (status === 'draft' || status === 'archived') {
             updateData.isPublished = false;
         } else {
             // Keep current publishing state if status is not explicitly changed to draft/archived
             // This allows updating a 'published' course without sending status='published' every time
             const currentCourse = await Course.findById(req.params.id);
-            if (currentCourse && currentCourse.status === 'published') {
+            if (currentCourse && (currentCourse.status === 'published' || currentCourse.isPublished)) {
                 updateData.isPublished = true;
                 updateData.status = 'published';
             }
@@ -249,8 +250,12 @@ const getCourseById = async (req, res) => {
 // @access  Private/Admin
 const getAllStudents = async (req, res) => {
     try {
-        const students = await User.find({ role: 'student' }).select('-password');
-        res.json(students);
+        const students = await User.find({ role: 'student' }).select('-password').sort({ createdAt: -1 });
+        res.json({
+            success: true,
+            count: students.length,
+            data: students
+        });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -260,7 +265,38 @@ const getAllStudents = async (req, res) => {
 // @route   POST /api/admin/create-student
 // @access  Private/Admin
 const createStudent = async (req, res) => {
-    const { name, email, phone, collegeName, collegeDetails, personalAddress } = req.body;
+    const {
+        name, fullName,
+        email,
+        phone, mobile,
+        collegeName, institution,
+        collegeDetails, regNo, department, year,
+        personalAddress, city, state, pincode,
+        program, type
+    } = req.body;
+
+    const finalName = fullName || name || (email ? email.split('@')[0] : 'Student');
+    const finalPhone = mobile || phone || '0000000000';
+    const finalCollegeName = institution || collegeName || 'Not Provided';
+
+    console.log('DEBUG: createStudent payload:', { finalName, email, finalPhone, finalCollegeName });
+
+    // Construct collegeDetails if parts are provided
+    let finalCollegeDetails = collegeDetails;
+    if (regNo || department || year) {
+        finalCollegeDetails = `Reg No: ${regNo || 'N/A'}, Dept: ${department || 'N/A'}, Year: ${year || 'N/A'}`;
+    } else {
+        finalCollegeDetails = finalCollegeDetails || 'Not Provided';
+    }
+
+    // Construct personalAddress if parts are provided
+    let finalPersonalAddress = personalAddress;
+    if (city || state || pincode) {
+        const addressParts = [city, state, pincode].filter(Boolean);
+        finalPersonalAddress = addressParts.length > 0 ? addressParts.join(', ') : 'Not Provided';
+    } else {
+        finalPersonalAddress = finalPersonalAddress || 'Not Provided';
+    }
 
     try {
         const userExists = await User.findOne({ email });
@@ -272,29 +308,30 @@ const createStudent = async (req, res) => {
         const password = crypto.randomBytes(8).toString('hex');
 
         const user = await User.create({
-            name,
+            name: finalName,
             email,
             password, // Hook will hash it
             tempPassword: password, // For admin to view
-            phone: phone || '0000000000',
-            collegeName: collegeName || 'Not Provided',
-            collegeDetails: collegeDetails || 'Not Provided',
-            personalAddress: personalAddress || 'Not Provided',
-            role: 'student'
+            phone: finalPhone,
+            collegeName: finalCollegeName,
+            collegeDetails: finalCollegeDetails,
+            personalAddress: finalPersonalAddress,
+            role: 'student',
+            program: program || 'N/A',
+            programType: type || 'Certification Course'
         });
 
         // Send Email
         const htmlMessage = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
                 <h2 style="color: #007bff; text-align: center;">Welcome to Petluri Edutech LMS</h2>
-                <p>Hello <strong>${name}</strong>,</p>
-                <p>Your student account has been created successfully by the administrator. You can now access your learning portal.</p>
+                <p>Hello <strong>${finalName}</strong>,</p>
+                <p>Your student account has been created successfully by the administrator. You have been invited to join <strong>${program || 'our learning platform'}</strong>.</p>
                 <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
                     <p style="margin: 5px 0;"><strong>Login URL:</strong> <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/login" style="color: #007bff;">Click Here to Login</a></p>
                     <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
-                    <p style="margin: 5px 0;"><strong>Temporary Password:</strong> <code style="background: #eee; padding: 2px 5px; border-radius: 3px;">${password}</code></p>
                 </div>
-                <p style="color: #666; font-size: 14px;">Please login and change your password immediately to ensure your account security.</p>
+                <p style="color: #666; font-size: 14px;">Please use the email above to sign in via the OTP sent to your mailbox.</p>
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                 <p style="font-size: 12px; color: #777; text-align: center;">&copy; 2026 Petluri Edutech LMS. All rights reserved.</p>
             </div>
@@ -303,9 +340,9 @@ const createStudent = async (req, res) => {
         try {
             await sendEmail({
                 email: user.email,
-                subject: 'Your Petluri Edutech Student Account Credentials',
+                subject: 'Your Petluri Edutech Student Account',
                 html: htmlMessage,
-                message: `Email: ${email}, Password: ${password}` // fallback
+                message: `You have been invited to join ${program || 'our learning platform'}. Login at: ${process.env.CLIENT_URL || 'http://localhost:5173'}/login`
             });
         } catch (emailError) {
             console.error('Email send failed', emailError);
@@ -317,6 +354,40 @@ const createStudent = async (req, res) => {
         });
 
     } catch (error) {
+        console.error('ERROR in createStudent:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message,
+            error: error.errors
+        });
+    }
+};
+
+// @desc    Delete a student
+// @route   DELETE /api/admin/students/:id
+// @access  Private/Admin
+const deleteStudent = async (req, res) => {
+    try {
+        const student = await User.findById(req.params.id);
+
+        if (!student) {
+            return res.status(404).json({ message: 'Student not found' });
+        }
+
+        if (student.role !== 'student') {
+            return res.status(403).json({ message: 'Cannot delete non-student users' });
+        }
+
+        // Delete associated enrollments (optional but keeps DB clean)
+        const Enrollment = require('../models/Enrollment');
+        await Enrollment.deleteMany({ userId: student._id });
+
+        await student.onDelete ? student.onDelete() : null; // If there's a hook
+        await User.findByIdAndDelete(req.params.id);
+
+        res.json({ message: 'Student and associated enrollments deleted successfully' });
+    } catch (error) {
+        console.error('ERROR in deleteStudent:', error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -720,5 +791,6 @@ module.exports = {
     getDashboardStats,
     uploadVideo,
     deleteCourse,
-    linkQuizzesToCourse // Exporting for use in controllers if needed, but here it's internal helper
+    deleteStudent,
+    linkQuizzesToCourse
 };
